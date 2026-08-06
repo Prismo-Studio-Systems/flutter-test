@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base href="/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Prismo — POC de dashboard em Flutter Web com métricas ao vivo.">
+  <meta name="color-scheme" content="dark light">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Prismo">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <link rel="manifest" href="manifest.json">
+
+  <title>Prismo — Observabilidade</title>
+
+  <style>
+    /*
+     * O splash é HTML puro de propósito: ele precisa aparecer antes de
+     * qualquer byte do Flutter chegar. As cores espelham lib/theme/gruvbox.dart
+     * e o tema salvo é lido do mesmo localStorage que o app usa.
+     */
+    :root {
+      --canvas: #282828;
+      --panel: #32302f;
+      --fg: #ebdbb2;
+      --muted: #a89984;
+      --accent: #fabd2f;
+      --accent2: #8ec07c;
+      --border: #504945;
+    }
+    html[data-boot-theme="gruvbox-dark-hard"] {
+      --canvas: #1d2021; --panel: #282828; --fg: #ebdbb2; --muted: #a89984;
+      --accent: #fe8019; --accent2: #83a598; --border: #3c3836;
+    }
+    html[data-boot-theme="gruvbox-light"] {
+      --canvas: #fbf1c7; --panel: #f2e5bc; --fg: #3c3836; --muted: #7c6f64;
+      --accent: #b57614; --accent2: #427b58; --border: #d5c4a1;
+    }
+    html[data-boot-theme="gruvbox-light-hard"] {
+      --canvas: #f9f5d7; --panel: #fbf1c7; --fg: #3c3836; --muted: #7c6f64;
+      --accent: #af3a03; --accent2: #076678; --border: #d5c4a1;
+    }
+
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background-color: var(--canvas);
+      overscroll-behavior: none;
+    }
+
+    #boot {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--canvas);
+      color: var(--fg);
+      font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      transition: opacity .38s ease, visibility .38s ease;
+    }
+    #boot.done { opacity: 0; visibility: hidden; pointer-events: none; }
+
+    .boot-card { width: min(420px, calc(100vw - 48px)); }
+
+    .boot-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+    .boot-logo {
+      width: 38px; height: 38px; border-radius: 9px; flex: none;
+      border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .boot-logo svg { width: 19px; height: 19px; stroke: var(--accent); fill: none; stroke-width: 1.6; }
+    .boot-title { font-size: 15px; font-weight: 800; letter-spacing: 2.6px; }
+    .boot-sub { font-size: 10.5px; color: var(--muted); margin-top: 2px; letter-spacing: .4px; }
+
+    .boot-track {
+      height: 5px; border-radius: 3px; overflow: hidden;
+      background: color-mix(in srgb, var(--border) 70%, transparent);
+    }
+    .boot-fill {
+      height: 100%; width: 0%; border-radius: 3px;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      transition: width .22s cubic-bezier(.4,0,.2,1);
+    }
+
+    .boot-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 12px; margin-top: 11px; font-size: 11.5px;
+    }
+    .boot-stage { color: var(--fg); font-weight: 600; }
+    .boot-pct { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .boot-detail {
+      margin-top: 5px; font-size: 10.5px; color: var(--muted);
+      display: flex; justify-content: space-between; gap: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .boot-log {
+      margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--border);
+      font-size: 10px; color: var(--muted); line-height: 1.9;
+      min-height: 76px;
+    }
+    .boot-log div { display: flex; justify-content: space-between; gap: 10px; }
+    .boot-log .ok::before { content: "✓ "; color: var(--accent2); }
+    .boot-log b { color: var(--fg); font-weight: 500; }
+    .boot-log span { font-variant-numeric: tabular-nums; }
+
+    .boot-error {
+      margin-top: 16px; font-size: 11.5px; color: #fb4934;
+      line-height: 1.6; display: none;
+    }
+    .boot-error.visible { display: block; }
+    .boot-error button {
+      margin-top: 10px; padding: 7px 14px; cursor: pointer;
+      font: inherit; font-size: 11px;
+      background: var(--panel); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 6px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .boot-fill, #boot { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="boot" role="progressbar" aria-label="Carregando aplicação"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <div class="boot-card">
+      <div class="boot-brand">
+        <div class="boot-logo">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div>
+          <div class="boot-title">PRISMO</div>
+          <div class="boot-sub">observabilidade · flutter web</div>
+        </div>
+      </div>
+
+      <div class="boot-track"><div class="boot-fill" id="boot-fill"></div></div>
+
+      <div class="boot-row">
+        <span class="boot-stage" id="boot-stage">Iniciando…</span>
+        <span class="boot-pct" id="boot-pct">0%</span>
+      </div>
+      <div class="boot-detail">
+        <span id="boot-detail"></span>
+        <span id="boot-elapsed">0,0 s</span>
+      </div>
+
+      <div class="boot-log" id="boot-log"></div>
+
+      <div class="boot-error" id="boot-error">
+        <span id="boot-error-text"></span>
+        <br><button onclick="location.reload()">Tentar novamente</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    "use strict";
+
+    // ---------------------------------------------------------------------
+    // Estado exposto ao app Flutter (lido em lib/core/js_bridge.dart).
+    // ---------------------------------------------------------------------
+    var NS = window.__prismoBoot = {
+      marks: [],
+      appReady: function () { finish(); },
+      appProgress: function (fraction, label) {
+        // Fase final: o app já roda e reporta a própria hidratação.
+        set(0.95 + 0.04 * clamp01(fraction), label);
+      },
+      // Marcos vindos do próprio Dart, para o waterfall cobrir o trecho que
+      // só o app enxerga (montar serviços, construir a árvore).
+      appMark: function (name, label) { mark(name, label, 0); }
+    };
+
+    var el = {
+      root: document.getElementById("boot"),
+      fill: document.getElementById("boot-fill"),
+      pct: document.getElementById("boot-pct"),
+      stage: document.getElementById("boot-stage"),
+      detail: document.getElementById("boot-detail"),
+      elapsed: document.getElementById("boot-elapsed"),
+      log: document.getElementById("boot-log"),
+      error: document.getElementById("boot-error"),
+      errorText: document.getElementById("boot-error-text")
+    };
+
+    // ---------------------------------------------------------------------
+    // Tema: mesma chave usada pelo ThemeController do Dart, para que o splash
+    // já apareça na cor que o usuário escolheu da última vez.
+    // ---------------------------------------------------------------------
+    (function applyTheme() {
+      var saved = null;
+      try { saved = localStorage.getItem("prismo.theme"); } catch (e) {}
+      var valid = ["gruvbox-dark", "gruvbox-dark-hard", "gruvbox-light", "gruvbox-light-hard"];
+      if (valid.indexOf(saved) === -1) {
+        var prefersLight = window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: light)").matches;
+        saved = prefersLight ? "gruvbox-light" : "gruvbox-dark";
+      }
+      document.documentElement.setAttribute("data-boot-theme", saved);
+    })();
+
+    // ---------------------------------------------------------------------
+    // Progresso. Monotônico: uma barra que volta atrás mente sobre o estado.
+    // ---------------------------------------------------------------------
+    var progress = 0;
+    var bytesTotal = 0;
+    var finished = false;
+
+    function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+    function set(value, stage, detail) {
+      progress = Math.max(progress, clamp01(value));
+      var pct = Math.round(progress * 100);
+      el.fill.style.width = pct + "%";
+      el.pct.textContent = pct + "%";
+      el.root.setAttribute("aria-valuenow", String(pct));
+      if (stage) el.stage.textContent = stage;
+      if (detail !== undefined) el.detail.textContent = detail;
+    }
+
+    function mark(name, label, bytes) {
+      bytes = bytes || 0;
+      bytesTotal += bytes;
+      NS.marks.push({ name: name, label: label, t: now(), bytes: bytes });
+      var row = document.createElement("div");
+      row.className = "ok";
+      var b = document.createElement("b");
+      b.textContent = label;
+      var s = document.createElement("span");
+      s.textContent = (bytes ? fmtBytes(bytes) + " · " : "") + Math.round(now()) + " ms";
+      row.appendChild(b);
+      row.appendChild(s);
+      el.log.appendChild(row);
+      while (el.log.childElementCount > 5) el.log.removeChild(el.log.firstChild);
+    }
+
+    function now() { return performance.now(); }
+
+    function fmtBytes(n) {
+      if (!n) return "0 B";
+      var u = ["B", "KB", "MB", "GB"], i = 0, v = n;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return (i === 0 ? v.toFixed(0) : v.toFixed(1)) + " " + u[i];
+    }
+
+    (function tickElapsed() {
+      if (finished) return;
+      el.elapsed.textContent = (now() / 1000).toFixed(1).replace(".", ",") + " s";
+      requestAnimationFrame(tickElapsed);
+    })();
+
+    function fail(message) {
+      console.error("[boot]", message);
+      el.errorText.textContent = "Falha ao carregar: " + message;
+      el.error.classList.add("visible");
+      el.stage.textContent = "Erro";
+    }
+
+    function finish() {
+      if (finished) return;
+      finished = true;
+      mark("firstFrame", "Primeiro frame renderizado", 0);
+      set(1, "Pronto");
+      // Um frame de folga para a barra chegar visualmente a 100%.
+      setTimeout(function () {
+        el.root.classList.add("done");
+        setTimeout(function () {
+          if (el.root.parentNode) el.root.parentNode.removeChild(el.root);
+        }, 450);
+      }, 90);
+    }
+
+    // ---------------------------------------------------------------------
+    // Contagem de bytes dos assets do engine (CanvasKit / Skwasm).
+    //
+    // O clone da Response é lido em paralelo só para contar: o corpo original
+    // segue intacto para o WebAssembly.compileStreaming do engine.
+    // ---------------------------------------------------------------------
+    var engineBytes = 0;
+    var engineExpected = 0;
+    var ENGINE_FALLBACK_TOTAL = 6.4 * 1024 * 1024; // canvaskit típico, sem gzip
+
+    function installFetchCounter() {
+      if (!window.fetch || !window.ReadableStream) return;
+      var original = window.fetch;
+      window.fetch = function (input, init) {
+        var url = typeof input === "string" ? input : (input && input.url) || "";
+        var promise = original.apply(this, arguments);
+        if (/canvaskit|skwasm|\.wasm(\?|$)/i.test(url)) {
+          promise.then(function (res) {
+            try { countClone(res.clone()); } catch (e) { /* sem clone, sem contagem */ }
+          }).catch(function () {});
+        }
+        return promise;
+      };
+    }
+
+    function countClone(res) {
+      var declared = parseInt(res.headers.get("content-length") || "0", 10);
+      if (declared > 0) engineExpected += declared;
+      if (!res.body) return;
+      var reader = res.body.getReader();
+      (function pump() {
+        reader.read().then(function (r) {
+          if (r.done) return;
+          engineBytes += r.value.length;
+          var total = engineExpected || ENGINE_FALLBACK_TOTAL;
+          set(0.62 + 0.24 * clamp01(engineBytes / total),
+              "Carregando renderizador",
+              fmtBytes(engineBytes) + (engineExpected ? " / " + fmtBytes(engineExpected) : ""));
+          pump();
+        }).catch(function () {});
+      })();
+    }
+
+    // ---------------------------------------------------------------------
+    // Captura do loader do Flutter.
+    //
+    // flutter.js só cria `_flutter.loader` se ainda não existir e o bootstrap
+    // chama `load()` na sequência. O Proxy intercepta essa atribuição para que
+    // o carregamento comece quando *nós* quisermos — depois de medir o
+    // download do entrypoint.
+    // ---------------------------------------------------------------------
+    var captured = null;
+
+    (function installLoaderTrap() {
+      var inner = window._flutter || {};
+      try {
+        window._flutter = new Proxy(inner, {
+          set: function (target, key, value) {
+            if (key === "loader" && value && typeof value.load === "function") {
+              var realLoad = value.load.bind(value);
+              value.load = function (options) {
+                captured = { load: realLoad, options: options || {} };
+                return Promise.resolve();
+              };
+            }
+            target[key] = value;
+            return true;
+          }
+        });
+      } catch (e) {
+        // Sem Proxy: segue o fluxo padrão, só sem medição do entrypoint.
+        window._flutter = inner;
+      }
+    })();
+
+    // ---------------------------------------------------------------------
+    // Sequência de carga.
+    // ---------------------------------------------------------------------
+    function fetchWithProgress(url, from, to, stage) {
+      return fetch(url).then(function (res) {
+        if (!res.ok) throw new Error(url + " → HTTP " + res.status);
+        var declared = parseInt(res.headers.get("content-length") || "0", 10);
+        if (!res.body || !declared) {
+          // Sem corpo streamável ou sem tamanho declarado (resposta chunked):
+          // não dá para mostrar fração honesta, então só marcamos o fim.
+          return res.arrayBuffer().then(function (buf) {
+            set(to, stage, fmtBytes(buf.byteLength));
+            return { buffer: buf, bytes: buf.byteLength };
+          });
+        }
+        var reader = res.body.getReader();
+        var chunks = [];
+        var loaded = 0;
+        return (function pump() {
+          return reader.read().then(function (r) {
+            if (r.done) {
+              var out = new Uint8Array(loaded);
+              var offset = 0;
+              for (var i = 0; i < chunks.length; i++) {
+                out.set(chunks[i], offset);
+                offset += chunks[i].length;
+              }
+              return { buffer: out.buffer, bytes: loaded };
+            }
+            chunks.push(r.value);
+            loaded += r.value.length;
+            set(from + (to - from) * (loaded / declared), stage,
+                fmtBytes(loaded) + " / " + fmtBytes(declared));
+            return pump();
+          });
+        })();
+      });
+    }
+
+    function runScript(text) {
+      var tag = document.createElement("script");
+      tag.type = "text/javascript";
+      tag.textContent = text;
+      document.head.appendChild(tag);
+    }
+
+    // O service worker do Flutter está deprecado e, para esta POC, atrapalha:
+    // serve tudo de um cache próprio, o que mascara o custo real da carga e
+    // faz um build novo demorar um reload extra para aparecer.
+    function dropServiceWorkers() {
+      if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistrations) {
+        return Promise.resolve();
+      }
+      return navigator.serviceWorker.getRegistrations()
+        .then(function (regs) {
+          return Promise.all(regs.map(function (r) { return r.unregister(); }));
+        })
+        .catch(function () {});
+    }
+
+    function start() {
+      set(0.02, "Contatando servidor");
+      installFetchCounter();
+      dropServiceWorkers();
+
+      var bootstrapUrl = new URL("flutter_bootstrap.js", document.baseURI).toString();
+
+      fetchWithProgress(bootstrapUrl, 0.02, 0.06, "Baixando bootstrap")
+        .then(function (r) {
+          mark("bootstrap", "Bootstrap do Flutter", r.bytes);
+          runScript(new TextDecoder().decode(r.buffer));
+
+          if (!captured) {
+            // O Proxy não pegou o loader (Proxy indisponível, ou o bootstrap
+            // mudou de formato). O Flutter já está carregando sozinho — resta
+            // acompanhar pelos marcos.
+            set(0.5, "Carregando aplicação");
+            return waitForAutoLoad();
+          }
+          return loadEntrypointThenEngine();
+        })
+        .catch(function (e) { fail(e && e.message ? e.message : String(e)); });
+    }
+
+    function loadEntrypointThenEngine() {
+      var config = window._flutter.buildConfig;
+      var build = pickBuild(config);
+      var prefetch = Promise.resolve(null);
+
+      if (build && build.mainJsPath && /main\.dart\.js$/.test(build.mainJsPath)) {
+        // Build release (dart2js). Baixamos o entrypoint aqui para ter
+        // progresso por byte e entregamos ao loader como blob, de modo que o
+        // arquivo trafega uma única vez.
+        var url = new URL(build.mainJsPath, document.baseURI).toString();
+        prefetch = fetchWithProgress(url, 0.06, 0.62, "Baixando aplicação")
+          .then(function (r) {
+            mark("entrypoint", "Código da aplicação", r.bytes);
+            build.mainJsPath = URL.createObjectURL(
+              new Blob([r.buffer], { type: "text/javascript" })
+            );
+          })
+          .catch(function (e) {
+            // Qualquer problema aqui é recuperável: o loader baixa do jeito
+            // tradicional e a barra segue pelos marcos.
+            console.warn("[boot] pré-download indisponível:", e);
+            set(0.4, "Baixando aplicação");
+          });
+      } else {
+        // Build de desenvolvimento (DDC): o entrypoint é um stub e os módulos
+        // chegam depois; medir bytes aqui não diria nada útil.
+        set(0.3, "Baixando aplicação (modo debug)");
+      }
+
+      return prefetch.then(function () {
+        set(0.62, "Carregando renderizador");
+        var options = captured.options || {};
+        return captured.load({
+          // serviceWorkerSettings omitido de propósito — ver dropServiceWorkers.
+          nonce: options.nonce,
+          config: options.config,
+          onEntrypointLoaded: function (engineInitializer) {
+            mark("engineReady", "Engine disponível", engineBytes);
+            set(0.88, "Inicializando engine");
+            return engineInitializer
+              .initializeEngine(options.config)
+              .then(function (appRunner) {
+                mark("engineInit", "Engine inicializado", 0);
+                set(0.93, "Iniciando aplicação");
+                return appRunner.runApp();
+              })
+              .then(function () {
+                mark("runApp", "Aplicação em execução", 0);
+                set(0.95, "Montando interface");
+                watchdog();
+              })
+              .catch(function (e) { fail(String(e)); });
+          }
+        });
+      });
+    }
+
+    function pickBuild(config) {
+      if (!config || !config.builds || !config.builds.length) return null;
+      // Só interceptamos o caminho dart2js; wasm segue o fluxo nativo.
+      for (var i = 0; i < config.builds.length; i++) {
+        if (config.builds[i].compileTarget === "dart2js") return config.builds[i];
+      }
+      return null;
+    }
+
+    function waitForAutoLoad() {
+      set(0.7, "Carregando aplicação");
+      watchdog();
+    }
+
+    // Se o app nunca sinalizar, o splash sai sozinho: melhor uma tela viva com
+    // possível defeito do que um splash eterno.
+    function watchdog() {
+      setTimeout(function () {
+        if (!finished) {
+          console.warn("[boot] sinal de app pronto não recebido; encerrando splash");
+          finish();
+        }
+      }, 6000);
+    }
+
+    window.addEventListener("error", function (e) {
+      if (!finished && e && e.message) fail(e.message);
+    });
+
+    start();
+  })();
+  </script>
+</body>
+</html>
